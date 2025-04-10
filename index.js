@@ -5,6 +5,8 @@ import bcrypt from "bcrypt";
 import { verifyUser } from './middleware/register.middleware.js';
 import validateEmailUsername from './middleware/details.middleware.js';
 import checkStrongPassword from './middleware/checkpassword.strength.js';
+import jwt from 'jsonwebtoken';
+import cookieParser from 'cookie-parser';
 
 
 
@@ -12,7 +14,9 @@ const app = express();
 app.use(cors({
   origin:'http://localhost:5173',
   methods:['POST','GET','PUT','PATCH','DELETE'],
+  credentials:true
 }));
+app.use(cookieParser());
 
 const client = new PrismaClient();
 app.use(express.json());
@@ -41,7 +45,6 @@ app.post('/auth/register', [verifyUser,validateEmailUsername,checkStrongPassword
 
       res.status(500).json({
         message:"Error creating the user",
-
       })
       
     }
@@ -49,30 +52,48 @@ app.post('/auth/register', [verifyUser,validateEmailUsername,checkStrongPassword
 });
 
 app.post('/auth/login', async (req, res) => {
-  const { identifiers, password } = req.body;
-
+  const {identifier, password} =req.body;  
   try {
-    const loginUser= await client.user.findFirst({
-      where:{
-        OR:[
-          { emailAddress: identifiers },
-          { userName: identifiers }
+     const user=await client.user.findFirst({
+      where: {
+        OR: [
+          { emailAddress:identifier },
+          { userName:identifier }
         ]
-      }
-    })
-    res.status(200).json({
-      message: "User found",
-      user: loginUser,
-    })
+      }    
+    })    
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
 
-  }catch (error) {
-    res.status(500).json({
-      message: "Error logging in",
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: 'Invalid credentials' });
+    }
+    const payload = {
+      userId: user.id,
+      emailAddress: user.emailAddress,
+      userName:user.userName,
+      firstName:user.firstName,
+      lastName:user.lastName,
+    };
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET_KEY, {
+      
     });
-  }
+    res.status(200).cookie("jwtToken",token,{}).json({
+      message: 'Login successful',
+     firstName:user.firstName,
+     lastName:user.lastName,
+     emailAddress: user.emailAddress,
+     userName: user.userName
+    });
 
-}
-);
+  } catch (error) {
+    console.error('Error during login:', error);
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
 
 
 
